@@ -3,11 +3,17 @@
 // Output file format:
 
 // The events file is appended to any time the RPM is measured over a certain threshold
+// A blank line is added between sessions
 // events.txt
   // Timestamp           | RPM
   // 2023-11-28 19:10:24 | 9999.48
+  // 2023-11-28 19:10:24 | 9999.48
+  // 2023-11-28 19:10:24 | 9999.48
+  //
+  // 2023-11-28 19:10:24 | 9999.48
 
-// Every time we start, a new log file is created, numbered using the current month, day, and time
+// Every time we start a new session, a new log file is created,
+//   numbered using the current month, day, and time
 // MMDDhhmm.txt
 // 11300131.txt
   // 2023-11-28 19:10:24
@@ -28,9 +34,7 @@
 
 #define RPM_THRESHOLD 5000.0f  // RPM over which to log as an event
 
-#define EVENT_FILE_NAME "event.txt"  // Follow 8.3 file naming scheme
-#define LOG_FILE_NAME   "log.txt"    // Follow 8.3 file naming scheme
-#define LOG_FILES_BASE_NAME "log"    // Max 6 characters
+#define EVENT_FILE_NAME "/events.txt"  // Follow 8.3 file naming scheme
 ////////
 
 //// Pins ////
@@ -50,6 +54,9 @@
 ////////    End Config    ////////
 
 
+// TODO: test for data loss/file size on power loss
+// TODO: probably flush the event file on each event
+// TODO: possibly flush the log file occasionally
 
 
 // #include <BluetoothSerial.h>
@@ -109,56 +116,70 @@ void updateTime() {
 }
 
 void logDataLine(float currRPM) {
-  // TODO: to file:
-  DEBUG_PRINT(now.dateTime.timestamp(DateTime::TIMESTAMP_TIME));
-  DEBUG_PRINT(".");
-  DEBUG_PRINT(now.deciseconds);
-  DEBUG_PRINT(" ");
-  DEBUG_PRINT(currRPM);
+  logFile.print(now.dateTime.timestamp(DateTime::TIMESTAMP_TIME));
+  logFile.print(".");
+  logFile.print(now.deciseconds);
+  logFile.print(" ");
+  logFile.print(currRPM);
   if (currRPM > RPM_THRESHOLD) {
-    DEBUG_PRINTLN(" <---");
+    // Mark the line if it's over the threshold to make it clearly visible
+    logFile.println(" <---");
   } else {
-    DEBUG_PRINTLN();
+    logFile.println();
   }
 }
 
 void logEvent(float currRPM) {
   DEBUG_PRINTLN("RPM exceeded threshold, logging event:");
-  // TODO: to file and debug print:
+
   char dateTimeBuffer[20] = "YYYY-MM-DD hh:mm:ss";
-  DEBUG_PRINT(now.dateTime.toString(dateTimeBuffer));
+  now.dateTime.toString(dateTimeBuffer);
+
+  DEBUG_PRINT(dateTimeBuffer);
   DEBUG_PRINT(" | ");
   DEBUG_PRINTLN(currRPM);
+
+  eventFile.print(dateTimeBuffer);
+  eventFile.print(" | ");
+  eventFile.println(currRPM);
 }
 
 
 bool openEventFile() {
+  bool existingFile = SD.exists(EVENT_FILE_NAME);
+
   eventFile = SD.open(EVENT_FILE_NAME, FILE_WRITE);
 
   if (!eventFile) {
+    // File didn't open or wasn't created
     return false;
   }
 
-  // TODO: only if new file
-  // TODO: maybe write a line to indicate a new session? (Even just an empty line?)
-  // Writes the following to the new file
-    // Timestamp           | RPM
-    //
-
-  DEBUG_PRINTLN("Timestamp           | RPM");
+  if (existingFile) {
+    // File already exists so we just add a blank line to indicate a new session
+    eventFile.println();
+    eventFile.println();
+  } else {
+    // New file, so we add the file header
+    eventFile.println("Timestamp           | RPM");
+    DEBUG_PRINTLN("Created new event file");
+  }
 
   return true;
 }
 
 bool openNewLogFile() {
-  char logFileName[13] = "MMDDhhmm.txt";
+  char logFileName[14] = "/MMDDhhmm.txt";
+  // char logFileName[14] = "/11300225.txt";
   setupTime.toString(logFileName);
+  
   DEBUG_PRINT("Writing new log file to:");
   DEBUG_PRINTLN(logFileName);
 
   logFile = SD.open(logFileName, FILE_WRITE);
 
   if (!logFile) {
+    // File didn't open or wasn't created
     return false;
   }
 
@@ -170,19 +191,20 @@ bool openNewLogFile() {
     //
 
   char dateTimeBuffer[20] = "YYYY-MM-DD hh:mm:ss";
-  DEBUG_PRINTLN(setupTime.toString(dateTimeBuffer));
+  logFile.println(setupTime.toString(dateTimeBuffer));
   
-  DEBUG_PRINTLN(); // TODO: OBD time
+  logFile.println(); // TODO: OBD time
 
-  DEBUG_PRINTLN("\r\nTimestamp||RPM");
+  logFile.println("\r\nTimestamp||RPM");
 
   return true;
 }
 
-void flushLogFile() {
-  logFile.close();
-  // openLogFile();
-}
+// void flushLogFile() {
+//   logFile.close();
+//   // openLogFile();
+// }
+
 
 
 void setup() {
@@ -232,17 +254,16 @@ void setup() {
   }
   DEBUG_PRINTLN(" initialization successful");
 
-
   // Files
-  // if (!openEventFile()) {
-  //   DEBUG_PRINTLN("Error opening the event file");
-  //   blink_led_loop(3000);
-  // }
+  if (!openEventFile()) {
+    DEBUG_PRINTLN("Error opening the event file");
+    blink_led_loop(3000);
+  }
 
-  // if (!openNewLogFile()) {
-  //   DEBUG_PRINTLN("Error opening the log file");
-  //   blink_led_loop(3000);
-  // }
+  if (!openNewLogFile()) {
+    DEBUG_PRINTLN("Error opening the log file");
+    blink_led_loop(3000);
+  }
 
   updateTime();
   logDataLine(123.4f);
