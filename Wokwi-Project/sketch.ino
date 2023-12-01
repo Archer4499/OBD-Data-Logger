@@ -31,8 +31,10 @@
 
 //// Constants/Settings ////
 #define DEBUG  // Print debug lines to serial, comment out to disable
+// #define OLD_LIB  // Simulator has older ELMduino library, uncomment if error while compiling
 
-#define RPM_THRESHOLD 5000.0f  // RPM over which to log as an event
+#define DATA_READ_INTERVAL 500      // Milliseconds between OBD RPM data reads
+#define RPM_THRESHOLD      5000.0f  // RPM over which to log as an event
 
 #define EVENT_FILE_NAME "/events.txt"  // Follow 8.3 file naming scheme
 ////////
@@ -59,8 +61,8 @@
 // TODO: possibly flush the log file occasionally
 
 
-// #include <BluetoothSerial.h>
-// #include <ELMduino.h>
+#include <BluetoothSerial.h>
+#include <ELMduino.h>
 #include <RTClib.h>
 #include <SD.h>
 
@@ -89,11 +91,11 @@ struct nowStruct {
 File eventFile;
 File logFile;
 
-// BluetoothSerial SerialBT;
-// #define ELM_PORT   SerialBT
-// ELM327 myELM327;
+BluetoothSerial SerialBT;
+#define ELM_PORT   SerialBT
+ELM327 myELM327;
 
-// uint32_t rpm = 0;
+long lastDataReadTime = 0;
 
 
 
@@ -109,10 +111,9 @@ void blink_led_loop(int interval) {
 }
 
 
-void updateTime() {
-  long internalNow = millis();
-  now.dateTime = setupTime + TimeSpan(internalNow/1000);
-  now.deciseconds = (internalNow % 1000) / 100;
+void updateTime(long currMillis) {
+  now.dateTime = setupTime + TimeSpan(currMillis/1000);
+  now.deciseconds = (currMillis % 1000) / 100;
 }
 
 void logDataLine(float currRPM) {
@@ -193,7 +194,8 @@ bool openNewLogFile() {
   char dateTimeBuffer[20] = "YYYY-MM-DD hh:mm:ss";
   logFile.println(setupTime.toString(dateTimeBuffer));
   
-  logFile.println(); // TODO: OBD time
+  logFile.print(getEngineTime());
+  logFile.println(" mins since OBD cleared");
 
   logFile.println("\r\nTimestamp||RPM");
 
@@ -204,6 +206,67 @@ bool openNewLogFile() {
 //   logFile.close();
 //   // openLogFile();
 // }
+
+
+bool initELM() {
+  myELM327.elm_port = &ELM_PORT;
+  myELM327.PAYLOAD_LEN = 40;
+  myELM327.debugMode = ELM_DEBUG;
+  myELM327.timeout_ms = 1000;
+
+  myELM327.payload = (char *)malloc(myELM327.PAYLOAD_LEN + 1); // allow for terminating '\0'
+
+  myELM327.sendCommand_Blocking(ECHO_OFF);
+  delay(100);
+  // myELM327.sendCommand_Blocking(PRINTING_SPACES_OFF);
+  // delay(100);
+
+  if (myELM327.sendCommand_Blocking(PRINTING_SPACES_OFF) == ELM_SUCCESS) {
+      if (strstr(myELM327.payload, "OK") != NULL) {
+          // Protocol search can take a comparatively long time. Temporarily set
+          // the timeout value to 30 seconds, then restore the previous value.
+          uint16_t prevTimeout = myELM327.timeout_ms;
+          myELM327.timeout_ms = 30000;
+
+          delay(100);
+          if (myELM327.sendCommand_Blocking("0100") == ELM_SUCCESS) {
+              myELM327.timeout_ms = prevTimeout;
+              return true;
+          }
+      }
+  }
+  return false;
+}
+
+float getRPM() {
+  if (myELM327.sendCommand_Blocking("010C") == ELM_SUCCESS) {
+
+#ifdef OLD_LIB
+    return myELM327.conditionResponse(myELM327.findResponse(), 2, 1.0/4.0);
+#else
+    myELM327.findResponse();
+    return myELM327.conditionResponse(2, 1.0/4.0);
+#endif
+
+  } else {
+    DEBUG_PRINTLN("Failed getting RPM");
+  }
+}
+
+uint16_t getEngineTime() {
+  if (myELM327.sendCommand_Blocking("014E") == ELM_SUCCESS) {
+
+#ifdef OLD_LIB
+    return (uint16_t)myELM327.conditionResponse(myELM327.findResponse(), 2);
+#else
+    myELM327.findResponse();
+    return (uint16_t)myELM327.conditionResponse(2);
+#endif
+
+  } else {
+    DEBUG_PRINTLN("Failed getting Engine Time");
+  }
+}
 
 
 
@@ -231,19 +294,19 @@ void setup() {
 
 
   // ELM327
-  // DEBUG_PRINTLN("Connecting to ELM327 via bluetooth");
-  // ELM_PORT.begin("ArduHUD", true);
+  DEBUG_PRINTLN("Connecting to ELM327 via bluetooth");
+  ELM_PORT.begin("ArduHUD", true);
   
-  // if (!ELM_PORT.connect("OBDII")) {
-  //   DEBUG_PRINTLN("Couldn't connect to OBD scanner - Phase 1");
-  //   blink_led_loop(50);
-  // }
+  if (!ELM_PORT.connect("OBDII")) {
+    DEBUG_PRINTLN("Couldn't connect to OBD scanner - Phase 1");
+    blink_led_loop(50);
+  }
 
-  // if (!myELM327.begin(ELM_PORT, ELM_DEBUG, 2000)) {
-  //   DEBUG_PRINTLN("Couldn't connect to OBD scanner - Phase 2");
-  //   blink_led_loop(200);
-  // }
-  // DEBUG_PRINTLN("Connected to ELM327");
+  if (!initELM()) {
+    DEBUG_PRINTLN("Couldn't connect to OBD scanner - Phase 2");
+    blink_led_loop(200);
+  }
+  DEBUG_PRINTLN("Connected to ELM327");
 
 
   // SD Card
@@ -264,49 +327,24 @@ void setup() {
     DEBUG_PRINTLN("Error opening the log file");
     blink_led_loop(3000);
   }
-
-  updateTime();
-  logDataLine(123.4f);
-  // logEvent();
-  delay(1240);
- 
-  updateTime();
-  logDataLine(9123.4f);
-  logEvent(9123.4f);
-  delay(1540);
- 
-  updateTime();
-  logDataLine(1223.4f);
-  // logEvent();
-  delay(1140);
- 
-  updateTime();
-  logDataLine(6452.1f);
-  logEvent(6452.1f);
-  delay(1740);
- 
-  updateTime();
-  logDataLine(522.4f);
-  // logEvent();
 }
 
 
 void loop() {
-  // float tempRPM = myELM327.rpm();
+  long currMillis = millis();
+  if (currMillis - lastDataReadTime > DATA_READ_INTERVAL) {
+    lastDataReadTime = currMillis;
 
-  // if (myELM327.nb_rx_state == ELM_SUCCESS) {
-  //   rpm = (uint32_t)tempRPM;
-  //   DEBUG_PRINT("RPM: "); DEBUG_PRINTLN(rpm);
-  //   logFile.println(rpm);
-  // } else if (myELM327.nb_rx_state != ELM_GETTING_MSG) {
-  //   myELM327.printError();
-  // }
+    updateTime(currMillis);
 
+    float rpm = getRPM();
 
-  // read three 'sensors' and append to the string:
-  // for (int analogPin = 0; analogPin < 3; analogPin++) {
-  //   int sensor = analogRead(analogPin);
-  //   logFile.println(sensor);
-  // }
-
+    logDataLine(rpm);
+    
+    if (rpm > RPM_THRESHOLD) {
+      logEvent(rpm);
+    }
+  } else {
+    delay(10);
+  }
 }
