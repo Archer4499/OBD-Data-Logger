@@ -264,6 +264,10 @@ bool initELM() {
 
   myELM327.sendCommand_Blocking(ECHO_OFF);
   delay(100);
+  
+	myELM327.sendCommand_Blocking(ALLOW_LONG_MESSAGES);
+	delay(100);
+
   // myELM327.sendCommand_Blocking(PRINTING_SPACES_OFF);
   // delay(100);
 
@@ -285,32 +289,30 @@ bool initELM() {
 }
 
 float getRPM() {
-  if (myELM327.sendCommand_Blocking("010C") == ELM_SUCCESS) {
+  while (true) {
+    float tempRPM = myELM327.rpm();
 
-#ifdef OLD_LIB
-    return myELM327.conditionResponse(myELM327.findResponse(), 2, 1.0/4.0);
-#else
-    myELM327.findResponse();
-    return myELM327.conditionResponse(2, 1.0/4.0);
-#endif
-
-  } else {
-    DEBUG_PRINTLN("Failed getting RPM");
+    if (myELM327.nb_rx_state == ELM_SUCCESS) {
+      return tempRPM;
+    }
+    else if (myELM327.nb_rx_state != ELM_GETTING_MSG) {
+      DEBUG_PRINTLN("Failed getting RPM");
+      return 0.0f;
+    }
   }
 }
 
 uint16_t getEngineTime() {
-  if (myELM327.sendCommand_Blocking("014E") == ELM_SUCCESS) {
+  while (true) {
+    uint16_t engineTime = myELM327.timeSinceCodesCleared();
 
-#ifdef OLD_LIB
-    return (uint16_t)myELM327.conditionResponse(myELM327.findResponse(), 2);
-#else
-    myELM327.findResponse();
-    return (uint16_t)myELM327.conditionResponse(2);
-#endif
-
-  } else {
-    DEBUG_PRINTLN("Failed getting Engine Time");
+    if (myELM327.nb_rx_state == ELM_SUCCESS) {
+      return engineTime;
+    }
+    else if (myELM327.nb_rx_state != ELM_GETTING_MSG) {
+      DEBUG_PRINTLN("Failed getting Engine TIme");
+      return 0;
+    }
   }
 }
 
