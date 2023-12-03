@@ -31,7 +31,7 @@
 
 //// Constants/Settings ////
 #define DEBUG  // Print debug lines to serial, comment out to disable
-// #define OLD_LIB  // Simulator has older ELMduino library, uncomment if error while compiling
+#define OLD_LIB  // ELMduino hasn't made a realease of the newest code on Github yet
 
 #define DATA_READ_INTERVAL 500      // Milliseconds between OBD RPM data reads
 #define RPM_THRESHOLD      5000.0f  // RPM over which to log as an event
@@ -40,13 +40,15 @@
 ////////
 
 //// Pins ////
-// These pins can be changed if needed, but it's recommended to use them as is
 
 // RTC Clock
-//      RTA_SDA_PIN 21
-//      RTA_SCL_PIN 22
+// I think these can be any of 4, 13-14, 16-33
+#define DS1302_CLK 4
+#define DS1302_DAT 16
+#define DS1302_RST 17
 
 // SD Card
+// These pins can be changed if needed, but it's recommended to use them as is
 #define CS_PIN  5
 //      SCK_PIN 18
 //      MISO_DO_PIN  19
@@ -63,7 +65,7 @@
 
 #include <BluetoothSerial.h>
 #include <ELMduino.h>
-#include <RTClib.h>
+#include <RtcDS1302.h>
 #include <SD.h>
 
 
@@ -81,10 +83,19 @@
 #endif
 
 
-RTC_DS1307 rtc;
-DateTime setupTime;
-struct nowStruct {
-  DateTime dateTime;
+// RTC_DS1307 rtc;
+// DateTime setupTime;
+// struct nowStruct {
+//   DateTime dateTime;
+//   uint8_t deciseconds;
+// } now;
+
+ThreeWire myWire(DS1302_DAT, DS1302_CLK, DS1302_RST);
+RtcDS1302<ThreeWire> rtc(myWire);
+
+RtcDateTime setupTime;
+struct NowStruct {
+  RtcDateTime dateTime;
   uint8_t deciseconds;
 } now;
 
@@ -112,12 +123,14 @@ void blink_led_loop(int interval) {
 
 
 void updateTime(long currMillis) {
-  now.dateTime = setupTime + TimeSpan(currMillis/1000);
+  now.dateTime = setupTime + currMillis/1000;
   now.deciseconds = (currMillis % 1000) / 100;
 }
 
 void logDataLine(float currRPM) {
-  logFile.print(now.dateTime.timestamp(DateTime::TIMESTAMP_TIME));
+  char timeBuffer[9];
+  toTime(timeBuffer, now.dateTime);
+  logFile.print(timeBuffer);
   logFile.print(".");
   logFile.print(now.deciseconds);
   logFile.print(" ");
@@ -133,8 +146,8 @@ void logDataLine(float currRPM) {
 void logEvent(float currRPM) {
   DEBUG_PRINTLN("RPM exceeded threshold, logging event:");
 
-  char dateTimeBuffer[20] = "YYYY-MM-DD hh:mm:ss";
-  now.dateTime.toString(dateTimeBuffer);
+  char dateTimeBuffer[20];
+  toDateTime(dateTimeBuffer, now.dateTime);
 
   DEBUG_PRINT(dateTimeBuffer);
   DEBUG_PRINT(" | ");
@@ -170,9 +183,8 @@ bool openEventFile() {
 }
 
 bool openNewLogFile() {
-  char logFileName[14] = "/MMDDhhmm.txt";
-  // char logFileName[14] = "/11300225.txt";
-  setupTime.toString(logFileName);
+  char logFileName[14];
+  createLogName(logFileName, setupTime);
   
   DEBUG_PRINT("Writing new log file to:");
   DEBUG_PRINTLN(logFileName);
@@ -191,8 +203,9 @@ bool openNewLogFile() {
     // Timestamp||RPM
     //
 
-  char dateTimeBuffer[20] = "YYYY-MM-DD hh:mm:ss";
-  logFile.println(setupTime.toString(dateTimeBuffer));
+  char dateTimeBuffer[20];
+  toDateTime(dateTimeBuffer, setupTime);
+  logFile.println(dateTimeBuffer);
   
   logFile.print(getEngineTime());
   logFile.println(" mins since OBD cleared");
@@ -206,6 +219,26 @@ bool openNewLogFile() {
 //   logFile.close();
 //   // openLogFile();
 // }
+
+
+void toDateTime(char* buffer, const RtcDateTime& dt) {
+  snprintf(buffer, 20,
+           "%04u-%02u-%02u %02u:%02u:%02u",
+           dt.Year(), dt.Month(), dt.Day(),
+           dt.Hour(), dt.Minute(), dt.Second() );
+}
+
+void toTime(char* buffer, const RtcDateTime& dt) {
+  snprintf(buffer, 9, "%02u:%02u:%02u",
+           dt.Hour(), dt.Minute(), dt.Second() );
+}
+
+void createLogName(char* buffer, const RtcDateTime& dt) {
+  snprintf(buffer, 14,
+           "/%02u%02u%02u%02u.txt",
+           dt.Month(), dt.Day(),
+           dt.Hour(), dt.Minute() );
+}
 
 
 bool initELM() {
@@ -278,19 +311,43 @@ void setup() {
 #endif
 
   // RTC Clock
-  if (!rtc.begin()) {
-    DEBUG_PRINTLN("Couldn't connect to the RTC clock");
-    blink_led_loop(1000);
-  }
+  // if (!rtc.begin()) {
+  //   DEBUG_PRINTLN("Couldn't connect to the RTC clock");
+  //   blink_led_loop(1000);
+  // }
   
-  if (!rtc.isrunning()) {
-    // When time needs to be set on a new device, or after a power loss, the
-    // following line sets the RTC to the date & time this sketch was compiled
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-    DEBUG_PRINTLN("RTC is NOT running, setting the time now to compile time");
+  // if (!rtc.isrunning()) {
+  //   // When time needs to be set on a new device, or after a power loss, the
+  //   // following line sets the RTC to the date & time this sketch was compiled
+  //   rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  //   DEBUG_PRINTLN("RTC is NOT running, setting the time now to compile time");
+  // }
+
+  // setupTime = rtc.now();
+  
+  // RTC Clock
+  rtc.Begin();
+  
+  if (!rtc.IsDateTimeValid()) {
+      // Common Causes:
+      //    1) first time you ran and the device wasn't running yet
+      //    2) the battery on the device is low or even missing
+
+      DEBUG_PRINTLN("RTC lost confidence in the DateTime!");
+      rtc.SetDateTime(RtcDateTime(__DATE__, __TIME__));
   }
 
-  setupTime = rtc.now();
+  if (rtc.GetIsWriteProtected()) {
+      DEBUG_PRINTLN("RTC was write protected, enabling writing now");
+      rtc.SetIsWriteProtected(false);
+  }
+
+  if (!rtc.GetIsRunning()) {
+      DEBUG_PRINTLN("RTC was not actively running, starting now");
+      rtc.SetIsRunning(true);
+  }
+
+  setupTime = rtc.GetDateTime();
 
 
   // ELM327
