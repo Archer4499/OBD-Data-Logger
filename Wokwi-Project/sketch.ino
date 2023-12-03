@@ -30,8 +30,9 @@
 ////////    Config    ////////
 
 //// Constants/Settings ////
-#define DEBUG  // Print debug lines to serial, comment out to disable
-#define OLD_LIB  // ELMduino hasn't made a realease of the newest code on Github yet
+#define DEBUG            // Print debug lines to serial, comment out to disable
+#define RESTART_ON_FAIL  // Restart if any of the muodules fail to initialize, comment out to disable
+#define OLD_LIB          // ELMduino hasn't made a realease of the newest code on Github yet
 
 #define DATA_READ_INTERVAL 500      // Milliseconds between OBD RPM data reads
 #define RPM_THRESHOLD      5000.0f  // RPM over which to log as an event
@@ -110,15 +111,23 @@ long lastDataReadTime = 0;
 
 
 
-void blink_led_loop(int interval) {
+void blink_led_restart(int interval) {
+#ifdef RESTART_ON_FAIL
+  for (int i = 0; i < 5000/interval; i++) {
+#else
   while (true) {
+#endif
 #ifdef LED_BUILTIN
     digitalWrite(LED_BUILTIN, HIGH);
     delay(interval);
     digitalWrite(LED_BUILTIN, LOW);
-    delay(interval);
 #endif
+    delay(interval);
   }
+
+#ifdef RESTART_ON_FAIL
+  ESP.restart();
+#endif
 }
 
 
@@ -317,7 +326,7 @@ void setup() {
   // RTC Clock
   // if (!rtc.begin()) {
   //   DEBUG_PRINTLN("Couldn't connect to the RTC clock");
-  //   blink_led_loop(1000);
+  //   blink_led_restart(1000);
   // }
   
   // if (!rtc.isrunning()) {
@@ -360,12 +369,12 @@ void setup() {
   
   if (!ELM_PORT.connect("OBDII")) {
     DEBUG_PRINTLN("Couldn't connect to OBD scanner - Phase 1");
-    blink_led_loop(50);
+    blink_led_restart(50);
   }
 
   if (!initELM()) {
     DEBUG_PRINTLN("Couldn't connect to OBD scanner - Phase 2");
-    blink_led_loop(200);
+    blink_led_restart(100);
   }
   DEBUG_PRINTLN("Connected to ELM327");
 
@@ -374,19 +383,19 @@ void setup() {
   DEBUG_PRINT("Initializing SD card...");
   if (!SD.begin(CS_PIN)) {
     DEBUG_PRINTLN(" initialization failed");
-    blink_led_loop(2000);
+    blink_led_restart(1000);
   }
   DEBUG_PRINTLN(" initialization successful");
 
   // Files
   if (!openEventFile()) {
     DEBUG_PRINTLN("Error opening the event file");
-    blink_led_loop(3000);
+    blink_led_restart(1500);
   }
 
   if (!openNewLogFile()) {
     DEBUG_PRINTLN("Error opening the log file");
-    blink_led_loop(3000);
+    blink_led_restart(1500);
   }
 }
 
