@@ -141,6 +141,8 @@ void logDataLine(float currRPM) {
   } else {
     logFile.println();
   }
+
+  logFile.flush();
 }
 
 void logEvent(float currRPM) {
@@ -156,6 +158,8 @@ void logEvent(float currRPM) {
   eventFile.print(dateTimeBuffer);
   eventFile.print(" | ");
   eventFile.println(currRPM);
+
+  eventFile.flush();
 }
 
 
@@ -324,7 +328,7 @@ void setup() {
   // }
 
   // setupTime = rtc.now();
-  
+
   // RTC Clock
   rtc.Begin();
   
