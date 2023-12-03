@@ -32,7 +32,6 @@
 //// Constants/Settings ////
 #define DEBUG            // Print debug lines to serial, comment out to disable
 #define RESTART_ON_FAIL  // Restart if any of the muodules fail to initialize, comment out to disable
-#define OLD_LIB          // ELMduino hasn't made a realease of the newest code on Github yet
 
 #define DATA_READ_INTERVAL 500      // Milliseconds between OBD RPM data reads
 #define RPM_THRESHOLD      5000.0f  // RPM over which to log as an event
@@ -59,11 +58,6 @@
 ////////    End Config    ////////
 
 
-// TODO: test for data loss/file size on power loss
-// TODO: probably flush the event file on each event
-// TODO: possibly flush the log file occasionally
-
-
 #include <BluetoothSerial.h>
 #include <ELMduino.h>
 #include <RtcDS1302.h>
@@ -83,13 +77,6 @@
   #define ELM_DEBUG false
 #endif
 
-
-// RTC_DS1307 rtc;
-// DateTime setupTime;
-// struct nowStruct {
-//   DateTime dateTime;
-//   uint8_t deciseconds;
-// } now;
 
 ThreeWire myWire(DS1302_DAT, DS1302_CLK, DS1302_RST);
 RtcDS1302<ThreeWire> rtc(myWire);
@@ -228,11 +215,6 @@ bool openNewLogFile() {
   return true;
 }
 
-// void flushLogFile() {
-//   logFile.close();
-//   // openLogFile();
-// }
-
 
 void toDateTime(char* buffer, const RtcDateTime& dt) {
   snprintf(buffer, 20,
@@ -265,10 +247,10 @@ bool initELM() {
   myELM327.sendCommand_Blocking(ECHO_OFF);
   delay(100);
   
-	myELM327.sendCommand_Blocking(ALLOW_LONG_MESSAGES);
-	delay(100);
+  myELM327.sendCommand_Blocking(ALLOW_LONG_MESSAGES);
+  delay(100);
 
-  // myELM327.sendCommand_Blocking(PRINTING_SPACES_OFF);
+  // myELM327.sendCommand_Blocking(PRINTING_SPACES_OFF);  // Done in the check below
   // delay(100);
 
   if (myELM327.sendCommand_Blocking(PRINTING_SPACES_OFF) == ELM_SUCCESS) {
@@ -324,21 +306,6 @@ void setup() {
 #ifdef LED_BUILTIN
   pinMode(LED_BUILTIN, OUTPUT);
 #endif
-
-  // RTC Clock
-  // if (!rtc.begin()) {
-  //   DEBUG_PRINTLN("Couldn't connect to the RTC clock");
-  //   blink_led_restart(1000);
-  // }
-  
-  // if (!rtc.isrunning()) {
-  //   // When time needs to be set on a new device, or after a power loss, the
-  //   // following line sets the RTC to the date & time this sketch was compiled
-  //   rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-  //   DEBUG_PRINTLN("RTC is NOT running, setting the time now to compile time");
-  // }
-
-  // setupTime = rtc.now();
 
   // RTC Clock
   rtc.Begin();
